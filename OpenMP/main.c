@@ -48,8 +48,6 @@ void training(LeNet5 *lenet, image *train_data, uint8 *train_label, int batch_si
 	for (int i = 0, percent = 0; i <= total_size - batch_size; i += batch_size)
 	{
 		TrainBatch(lenet, train_data + i, train_label + i, batch_size);
-		/*if (i * 100 / total_size > percent)
-			printf("batchsize:%d\ttrain:%2d%%\n", batch_size, percent = i * 100 / total_size);*/
 
 		display_progress(i+batch_size, total_size);
 	}
@@ -57,21 +55,6 @@ void training(LeNet5 *lenet, image *train_data, uint8 *train_label, int batch_si
 
 }
 
-/*int testing(LeNet5 *lenet, image *test_data, uint8 *test_label,int total_size)
-{
-	int right = 0, percent = 0;
-	#pragma omp parallel for reduction(+:right)
-	for (int i = 0; i < total_size; ++i)
-	{
-		uint8 l = test_label[i];
-		int p = Predict(lenet, test_data[i], 10);
-		right += l == p;
-
-		display_progress(i+1, total_size);
-	}
-	printf(" Testing Complete\n");
-	return right;
-}*/
 
 int testing(LeNet5 *lenet, image *test_data, uint8 *test_label, int total_size) {
     int right = 0;
@@ -145,10 +128,24 @@ void foo()
 	if (load(lenet, LENET_FILE))
 		Initial(lenet);
 	int batches[] = { 300 };
+
+	double Trainstart_time = omp_get_wtime();
+
 	for (int i = 0; i < sizeof(batches) / sizeof(*batches);++i)
 		training(lenet, train_data, train_label, batches[i],COUNT_TRAIN);
+
+	double     Trainend_time = omp_get_wtime();
+	double Trainelapsed_time = Trainend_time - Trainstart_time;
+	printf("Elapsed time for training: %f seconds\n", Trainelapsed_time);
+
+	double Teststart_time = omp_get_wtime();
 	int right = testing(lenet, test_data, test_label, COUNT_TEST);
-	printf("Accuracy: %f %%\n", (float)right / COUNT_TEST);
+	double     Testend_time = omp_get_wtime();
+	double Testelapsed_time = Testend_time - Teststart_time;
+	printf("Elapsed time for testing: %f seconds\n", Testelapsed_time);
+
+
+	printf("Accuracy: %f %%\n", ((float)right / COUNT_TEST)*100);
 	//printf("%d/%d\n", right, COUNT_TEST);
 	
 	//save(lenet, LENET_FILE);
@@ -168,7 +165,7 @@ int main()
 {		
 	double start_time = omp_get_wtime();
 	foo();
-	double     end_time = omp_get_wtime();
+	double end_time = omp_get_wtime();
 	double elapsed_time = end_time - start_time;
     printf("Elapsed time: %f seconds\n", elapsed_time);
 

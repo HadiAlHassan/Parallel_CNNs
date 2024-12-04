@@ -12,7 +12,6 @@
 
 #define CONVOLUTE_VALID(input,output,weight)                                           \
 {                                                                                       \
-    _Pragma("omp parallel for")                                            \
     FOREACH(o0,GETLENGTH(output))                                                        \
         FOREACH(o1,GETLENGTH(*(output)))                                                 \
             FOREACH(w0,GETLENGTH(weight))                                                \
@@ -22,7 +21,6 @@
 
 #define CONVOLUTE_FULL(input,output,weight)                                               \
 {                                                                                       \
-    _Pragma("omp parallel for")                                            \
     FOREACH(i0,GETLENGTH(input))                                                        \
         FOREACH(i1,GETLENGTH(*(input)))                                                 \
             FOREACH(w0,GETLENGTH(weight))                                               \
@@ -31,6 +29,7 @@
 }
 #define CONVOLUTION_FORWARD(input,output,weight,bias,action)					\
 {																				\
+    _Pragma("omp parallel for collapse(2)")                                            \
 	for (int x = 0; x < GETLENGTH(weight); ++x)									\
 		for (int y = 0; y < GETLENGTH(*weight); ++y)							\
 			CONVOLUTE_VALID(input[x], output[y], weight[x][y]);					\
@@ -41,14 +40,17 @@
 
 #define CONVOLUTION_BACKWARD(input,inerror,outerror,weight,wd,bd,actiongrad)\
 {																			\
+    _Pragma("omp parallel for collapse(2)")                                 \
 	for (int x = 0; x < GETLENGTH(weight); ++x)								\
 		for (int y = 0; y < GETLENGTH(*weight); ++y)						\
 			CONVOLUTE_FULL(outerror[y], inerror[x], weight[x][y]);			\
+																			\
 	FOREACH(i, GETCOUNT(inerror))											\
 		((double *)inerror)[i] *= actiongrad(((double *)input)[i]);			\
 	FOREACH(j, GETLENGTH(outerror))											\
 		FOREACH(i, GETCOUNT(outerror[j]))									\
 		bd[j] += ((double *)outerror[j])[i];								\
+	_Pragma("omp parallel for collapse(2)")                                 \
 	for (int x = 0; x < GETLENGTH(weight); ++x)								\
 		for (int y = 0; y < GETLENGTH(*weight); ++y)						\
 			CONVOLUTE_VALID(input[x], wd[x][y], outerror[y]);				\
@@ -59,6 +61,7 @@
 {																								\
 	const int len0 = GETLENGTH(*(input)) / GETLENGTH(*(output));								\
 	const int len1 = GETLENGTH(**(input)) / GETLENGTH(**(output));								\
+	_Pragma("omp parallel for collapse(3)")  /* Parallelize over i, o0, and o1 */              \
 	FOREACH(i, GETLENGTH(output))																\
 	FOREACH(o0, GETLENGTH(*(output)))															\
 	FOREACH(o1, GETLENGTH(**(output)))															\
@@ -67,18 +70,20 @@
 		FOREACH(l0, len0)																		\
 			FOREACH(l1, len1)																	\
 		{																						\
-			ismax = input[i][o0*len0 + l0][o1*len1 + l1] > input[i][o0*len0 + x0][o1*len1 + x1];\
+			ismax = input[i][o0 * len0 + l0][o1 * len1 + l1] > input[i][o0 * len0 + x0][o1 * len1 + x1];\
 			x0 += ismax * (l0 - x0);															\
 			x1 += ismax * (l1 - x1);															\
 		}																						\
-		output[i][o0][o1] = input[i][o0*len0 + x0][o1*len1 + x1];								\
+		output[i][o0][o1] = input[i][o0 * len0 + x0][o1 * len1 + x1];							\
 	}																							\
 }
+
 
 #define SUBSAMP_MAX_BACKWARD(input,inerror,outerror)											\
 {																								\
 	const int len0 = GETLENGTH(*(inerror)) / GETLENGTH(*(outerror));							\
 	const int len1 = GETLENGTH(**(inerror)) / GETLENGTH(**(outerror));							\
+	_Pragma("omp parallel for collapse(3)")  /* Parallelize over i, o0, and o1 */              \
 	FOREACH(i, GETLENGTH(outerror))																\
 	FOREACH(o0, GETLENGTH(*(outerror)))															\
 	FOREACH(o1, GETLENGTH(**(outerror)))														\
@@ -87,36 +92,51 @@
 		FOREACH(l0, len0)																		\
 			FOREACH(l1, len1)																	\
 		{																						\
-			ismax = input[i][o0*len0 + l0][o1*len1 + l1] > input[i][o0*len0 + x0][o1*len1 + x1];\
+			ismax = input[i][o0 * len0 + l0][o1 * len1 + l1] > input[i][o0 * len0 + x0][o1 * len1 + x1];\
 			x0 += ismax * (l0 - x0);															\
 			x1 += ismax * (l1 - x1);															\
 		}																						\
-		inerror[i][o0*len0 + x0][o1*len1 + x1] = outerror[i][o0][o1];							\
+		inerror[i][o0 * len0 + x0][o1 * len1 + x1] = outerror[i][o0][o1];						\
 	}																							\
 }
 
-#define DOT_PRODUCT_FORWARD(input,output,weight,bias,action)				\
-{																			\
-	for (int x = 0; x < GETLENGTH(weight); ++x)								\
-		for (int y = 0; y < GETLENGTH(*weight); ++y)						\
-			((double *)output)[y] += ((double *)input)[x] * weight[x][y];	\
-	FOREACH(j, GETLENGTH(bias))												\
-		((double *)output)[j] = action(((double *)output)[j] + bias[j]);	\
+
+#define DOT_PRODUCT_FORWARD(input,output,weight,bias,action)                   \
+{                                                                              \
+    _Pragma("omp parallel for")                                                \
+    for (int x = 0; x < GETLENGTH(weight); ++x)                                \
+    {                                                                          \
+        for (int y = 0; y < GETLENGTH(*weight); ++y)                           \
+        {                                                                      \
+            ((double *)output)[y] += ((double *)input)[x] * weight[x][y];      \
+        }                                                                      \
+    }                                                                          \
+                                                                               \
+    _Pragma("omp parallel for")                                                \
+    FOREACH(j, GETLENGTH(bias))                                                \
+    {                                                                          \
+        ((double *)output)[j] = action(((double *)output)[j] + bias[j]);       \
+    }                                                                          \
 }
+
 
 #define DOT_PRODUCT_BACKWARD(input,inerror,outerror,weight,wd,bd,actiongrad)	\
 {																				\
 	for (int x = 0; x < GETLENGTH(weight); ++x)									\
 		for (int y = 0; y < GETLENGTH(*weight); ++y)							\
 			((double *)inerror)[x] += ((double *)outerror)[y] * weight[x][y];	\
+																				\
 	FOREACH(i, GETCOUNT(inerror))												\
 		((double *)inerror)[i] *= actiongrad(((double *)input)[i]);				\
+																				\
 	FOREACH(j, GETLENGTH(outerror))												\
 		bd[j] += ((double *)outerror)[j];										\
+																				\
 	for (int x = 0; x < GETLENGTH(weight); ++x)									\
 		for (int y = 0; y < GETLENGTH(*weight); ++y)							\
 			wd[x][y] += ((double *)input)[x] * ((double *)outerror)[y];			\
 }
+
 
 double relu(double x)
 {
@@ -229,7 +249,7 @@ static double f64rand()
 }
 
 
-void TrainBatch(LeNet5 *lenet, image *inputs, uint8 *labels, int batchSize)
+/*void TrainBatch(LeNet5 *lenet, image *inputs, uint8 *labels, int batchSize)
 {
 	double buffer[GETCOUNT(LeNet5)] = { 0 };
 	int i = 0;
@@ -252,7 +272,36 @@ void TrainBatch(LeNet5 *lenet, image *inputs, uint8 *labels, int batchSize)
 	double k = ALPHA / batchSize;
 	FOREACH(i, GETCOUNT(LeNet5))
 		((double *)lenet)[i] += k * buffer[i];
+}*/
+
+
+void TrainBatch(LeNet5 *lenet, image *inputs, uint8 *labels, int batchSize)
+{
+    double buffer[GETCOUNT(LeNet5)] = { 0 };
+    int i = 0;
+
+    // Adding the reduction clause for the buffer
+    #pragma omp parallel for reduction(+:buffer[:GETCOUNT(LeNet5)])
+    for (i = 0; i < batchSize; ++i)
+    {
+        Feature features = { 0 };
+        Feature errors = { 0 };
+        LeNet5 deltas = { 0 };
+        load_input(&features, inputs[i]);
+        forward(lenet, &features, relu);
+        load_target(&features, &errors, labels[i]);
+        backward(lenet, &deltas, &errors, &features, relugrad);
+
+        // Sum the deltas into buffer
+        FOREACH(j, GETCOUNT(LeNet5))
+            buffer[j] += ((double *)&deltas)[j];
+    }
+
+    double k = ALPHA / batchSize;
+    FOREACH(i, GETCOUNT(LeNet5))
+        ((double *)lenet)[i] += k * buffer[i];
 }
+
 
 void Train(LeNet5 *lenet, image input, uint8 label)
 {
